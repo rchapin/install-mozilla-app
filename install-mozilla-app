@@ -1,0 +1,429 @@
+#!/bin/bash
+
+################################################################################
+# LICENSE
+#
+# This software is released under the Revised BSD License.
+# 
+# Copyright (c) 2015, Ryan Chapin, http:www.ryanchapin.com	      
+# All rights reserved.					      
+#                                                                     
+# Redistribution  and  use  in  source  and binary forms, with or
+# without modification, are permitted provided that the following
+# conditions are met:
+#                                                                     
+# *   Redistributions  of  source  code  must  retain  the  above
+# copyright  notice,  this  list  of conditions and the following
+# disclaimer.
+# 
+# *  Redistributions  in  binary  form  must  reproduce the above
+# copyright  notice,  this  list  of conditions and the following
+# disclaimer  in the documentation andor other materials provided
+# with the distribution.
+# 
+# *  Neither  the  name  of  Ryan  Chapin  nor  the  names of its
+# contributors may be used to endorse or promote products derived
+# from this software without specific prior written permission.
+#                                                                     
+# THIS   SOFTWARE  IS  PROVIDED  BY  THE  COPYRIGHT  HOLDERS  AND
+# CONTRIBUTORS  "AS  IS"  AND  ANY EXPRESS OR IMPLIED WARRANTIES,
+# INCLUDING,  BUT  NOT  LIMITED  TO,  THE  IMPLIED  WARRANTIES OF
+# MERCHANTABILITY  AND  FITNESS  FOR  A  PARTICULAR  PURPOSE  ARE
+# DISCLAIMED.   IN   NO  EVENT  SHALL  RYAN  CHAPIN,  ANY  HEIRS,
+# SUCCESSORS,  EXECUTORS AND OR ASSIGNS BE LIABLE FOR ANY DIRECT,
+# INDIRECT,  INCIDENTAL,  SPECIAL,  EXEMPLARY,  OR  CONSEQUENTIAL
+# DAMAGES   (INCLUDING,   BUT  NOT  LIMITED  TO,  PROCUREMENT  OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+# BUSINESS  INTERRUPTION)  HOWEVER  CAUSED  AND  ON ANY THEORY OF
+# LIABILITY,  WHETHER  IN  CONTRACT,  STRICT  LIABILITY,  OR TORT
+# (INCLUDING  NEGLIGENCE  OR OTHERWISE) ARISING IN ANY WAY OUT OF
+# THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+# SUCH DAMAGE.
+#
+################################################################################
+#
+# Script to automate the download, and installation of mozilla binaries into
+# a customizable directory which are accessed by a symlink.
+#
+# name:     install-mozilla-app
+# author:   Ryan Chapin
+# created:  2014-07-06
+# updated:  2015-03-09
+# version:  1.02
+#
+################################################################################
+# EXIT CODES:
+#
+# -1 : failed to parse input arguments.
+# -2 : APP argument was not provided or did not parse correctly.
+# -10: wget command failed.
+# -20: checksums did not match
+#
+################################################################################
+# CONFIGURATIONS:
+#
+
+USER_CONF_FILE="install-mozilla-app.conf"
+
+# Determine the directory in which the script resides
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# Pull in the user configurations
+source ${SCRIPT_DIR}/${USER_CONF_FILE} 
+
+UNPACK_DIR="install_moz_app_temp"
+
+# Urls to the tarballs and the checksum files to be downloaded
+# The prefix and suffixes will be concatenated with the name of the application
+# to be installed at runtime.
+BIN_BASE_URL_PREFIX=https://ftp.mozilla.org/pub/mozilla.org
+BIN_BASE_URL_SUFFIX=releases/latest/${OS_VERSION}/${LANGUAGE}
+
+SHA_SUMS_FILE=SHA512SUMS
+SHA_SUMS_URL_PREFIX=https://ftp.mozilla.org/pub/mozilla.org
+SHA_SUMS_URL_SUFFIX=releases/latest/${SHA_SUMS_FILE}
+
+
+################################################################################
+
+function about {
+   cat << EOF
+About: install-mozilla-app - Automates   the   download,    verification     and
+                             installation of distributions of mozilla  binaries.
+                             Currently, supports firefox and thunderbird and any
+                             other  binaries  that  follow  the  same  directory
+                             layout on the ftp.mozilla.org download site.
+EOF
+}
+
+function usage {
+   cat << EOF
+Usage: install-mozilla-app [OPTIONS] -a APP [firefox|thunderbird]
+
+   -t APP
+      The mozilla application to be installed, either firefox or thunderbird
+
+Options:
+   -h HELP
+      Outputs this basic usage information.
+
+   -v VERBOSE
+      Output  additional  feedback/information  during  runtime.   Without  this
+      option the program will not generate any runtime output.
+
+   -d DEBUG
+      Set debugging output to on.
+
+   --more-help EXTENDED HELP
+      Extended help and documentation.
+EOF
+}
+
+function extended_usage {
+cat << EOF
+Extended Usage:
+
+   Users are required to edit and configure the $USER_CONF_FILE.
+   It is self explainatory and will enable the user to configure  the  directory
+   into  which the files are  downloaded,  unpacked,  verified,  and  ultimately
+   installed.
+
+   In this context, installed means moved to the parent directory  as  specified
+   in the conf file and a generic symlink created to point to the most  recently
+   downloaded binary.
+
+   This enables the user to create whatever flavor of alias, or  launcher  which
+   will always refer to the most recently downloaded and installed version.
+
+   The most common problems using this  script  arise  from  misconfiguring  the
+   install-mozilla-app.conf and  not  including  valid  OS_VERSION  or  LANGUAGE
+   strings that are used on the mozilla download site as those values  are  used
+   to concatenate the URLs from which files are downloaded.
+
+Examples:
+
+   Given the following configuration:
+
+OS_VERSION="linux-x86_64"
+LANGUAGE="en-US"
+INSTALL_DIR="/usr/local"
+UNPACK_PARENT_DIR="/tmp"
+
+   And the following invocation:
+
+   $ ./install-mozilla-app -v -d -a firefox
+
+   The firefox binary for linux-x86_64 in US English will be downloaded  to  the
+   /tmp directory.  The file will be unpacked and verified  in  /tmp.   Assuming
+   that the most current version  of  firefox  is  36.0.1,  the  directory  that
+   contains the firefox binary and  its  attendant  files  will  be  renamed  to
+   'firefox-36.0.1' and then it will be moved to  the  INSTALL_DIR  (/usr/local)
+   as specified in the configs.  Then once moved to /usr/local  a  symlink  will
+   be created in /usr/local: firefox -> firefox-36.0.1
+EOF
+}
+
+################################################################################
+# Debugging
+
+# Accepts two arguments:
+#  $1 = OUTPUT_TYPE [v (verbose) | d (debug) ]
+#  $2 = OUTPUT_MSG
+function output_msg {
+   if [ "v" = "$1" ] && [ 1 -eq "$VERBOSE" ];
+   then
+      echo "$2"
+   fi	
+
+   if [ "d" = "$1" ] && [ 1 -eq "$DEBUG" ];
+   then
+      echo "$2"
+   fi	
+}
+
+
+function download_file {
+   local URL=$1
+   CMD="wget $URL"
+   
+   if [ 1 -ne "$VERBOSE" ];
+   then
+      CMD="$CMD > /dev/null 2>&1"
+   fi
+   
+   eval $CMD
+   
+   if [ 0 -ne $? ];
+   then
+      output_msg -v "ERROR: Command \'$CMD\' failed"
+      exit -10
+   fi
+}
+
+################################################################################
+
+HELP=0
+VERBOSE=0
+MORE_HELP=0
+DEBUG=0
+APP=""
+
+PARSED_OPTIONS=`getopt -o hvda: -l more-help -- "$@"`
+
+# Check to see if the getopts command failed
+if [ $? -ne 0 ];
+then
+   echo "ERROR: Failed to parse arguments"
+   exit -1
+fi
+
+eval set -- "$PARSED_OPTIONS"
+
+# Loop through all of the options with a case statement
+while true; do
+   case "$1" in
+      -h)
+         HELP=1
+         shift
+         ;;
+
+      -v)
+         VERBOSE=1
+         shift
+         ;;
+
+      -d)
+         DEBUG=1
+         shift
+         ;;
+
+      -a)
+         APP=$2
+         shift 2
+         ;;
+
+      --more-help)
+         MORE_HELP=1
+         shift 
+         ;;
+
+      --)
+         shift
+         break
+         ;;
+   esac
+done
+
+################################################################################
+
+if [ "$MORE_HELP" -eq 1 ];
+then
+   about
+   usage
+   echo ""
+   extended_usage
+   exit 0
+fi
+
+if [ "$HELP" -eq 1 ];
+then
+   usage
+   exit 0
+fi
+
+#
+# Check that the required arguments were provided
+#
+if [ -z "$APP" ];
+then
+   output_msg v "ERROR: no application key was specified"
+   exit -2
+fi
+
+output_msg d "-a HELP arg = $HELP"
+output_msg d "-a VERBOSE arg = $VERBOSE"
+output_msg d "-a MORE_HELP arg = $MORE_HELP"
+output_msg d "-a DEBUG arg = $DEBUG"
+output_msg d "-a APP arg = $APP"
+
+BINARY_NAME=$APP
+
+output_msg v "Installing mozilla app: $APP"
+
+# Concatenate the urls of both the binary to be downloaded and the checksum
+# files to be downloaded
+BIN_BASE_URL=${BIN_BASE_URL_PREFIX}/${BINARY_NAME}/${BIN_BASE_URL_SUFFIX}
+SHA_SUMS_URL=${SHA_SUMS_URL_PREFIX}/${BINARY_NAME}/${SHA_SUMS_URL_SUFFIX}
+
+START_DIR=`pwd`
+
+cd $UNPACK_PARENT_DIR
+
+#
+# Check to see if there is an existing UNPACK_DIR
+#
+if [ -d "$UNPACK_DIR" ];
+then
+   output_msg v "Deleting an existing UNPACK_DIR, ${UNPACK_PARENT_DIR}/${UNPACK_DIR}"
+   rm -rf $UNPACK_DIR
+fi
+
+mkdir $UNPACK_DIR
+cd $UNPACK_DIR
+
+#
+# Get the index.html that contains the name of the latest bz2 file
+#
+output_msg v "------------------------------"
+output_msg v "-- Downloading the index.html"
+output_msg v "--"
+
+WGET_INDEX_URL="${BIN_BASE_URL}/"
+download_file $WGET_INDEX_URL
+
+#
+# Dynamically generate the grep command that will pull the file name
+# out of the downloaded html
+#
+GREP_CMD="grep -oh '${BINARY_NAME}-.*.bz2\"' index.html | sed 's/\"//g'"
+output_msg d "BINARY_NAME GREP_CMD = $GREP_CMD"
+
+BZ2_FILE=$(eval "$GREP_CMD")
+output_msg d "BZ2_FILE = $BZ2_FILE"
+
+#
+# Get the version number from the file name
+#
+GREP_CMD="echo $BZ2_FILE | grep -oh '[0-9]\{1,2\}[.][0-9]\{1,2\}[.0-9]\{1,2\}\?'"
+VERSION_NUMBER=$(eval "$GREP_CMD")
+
+#
+# Run another regex on the string to make sure that we lop off any
+# trailing '.' if there is one
+#
+GREP_CMD="echo $VERSION_NUMBER | grep -oh '[.0-9].*[0-9]'"
+VERSION_NUMBER=$(eval "$GREP_CMD")
+output_msg d "VERSION_NUMBER = $VERSION_NUMBER"
+
+output_msg v "------------------------------"
+output_msg v "-- Downloading BZ2_FILE, $BZ2_FILE"
+output_msg v "--"
+
+WGET_INDEX_URL="${BIN_BASE_URL}/"
+download_file "${BIN_BASE_URL}/${BZ2_FILE}"
+
+
+#
+# Download the SHA512SUMS for the file and check that the downloaded binary
+# shasums match
+#
+output_msg v "------------------------------"
+output_msg v "-- Downloading shasum file"
+output_msg v "--"
+
+download_file $SHA_SUMS_URL
+
+SHA_KEY="${OS_VERSION}/${LANGUAGE}/${BZ2_FILE}"
+GREP_CMD="grep '$SHA_KEY' $SHA_SUMS_FILE"
+output_msg d "SHA_KEY GREP_CMD = $GREP_CMD"
+
+SHA_SUM_LINE=$(eval "$GREP_CMD")
+SHA_SUM=$(echo $SHA_SUM_LINE | awk '{print $1}')
+output_msg d "SHA_SUM = $SHA_SUM"
+
+BZ2_FILE_SHA_SUM=$(sha512sum $BZ2_FILE | awk '{print $1}')
+output_msg d "BZ2_FILE_SHA_SUM = $BZ2_FILE_SHA_SUM"
+
+SHA_SUM_MATCHED=false
+
+if [ "$SHA_SUM" == "$BZ2_FILE_SHA_SUM" ];
+then
+	SHA_SUM_MATCHED=true
+fi
+output_msg d "SHA_SUM_MATCHED = $SHA_SUM_MATCHED"
+
+#
+# Only continue unpacking and installing the program if the hashes validated
+#
+if [ "$SHA_SUM_MATCHED" = true ];
+then
+   output_msg v "the sha512sums matched, continuing installation...."
+
+	#
+	# Unpack the bz2 file and then rename it to include the version number
+	#
+	output_msg v "Unpacking the ${BZ2_FILE} file"
+	tar -xjf $BZ2_FILE
+	BIN_DIR_W_VERSION=${BINARY_NAME}-${VERSION_NUMBER}
+	mv $BINARY_NAME ${BIN_DIR_W_VERSION}
+
+	#
+	# mv it to the directory into which we are going to install it
+	#
+	output_msg v "Moving the unpacked dir $BIN_DIR_W_VERSION to $INSTALL_DIR"
+	rm -rf $INSTALL_DIR/$BIN_DIR_W_VERSION
+	mv $BIN_DIR_W_VERSION $INSTALL_DIR
+
+	#
+	# Updated the symlink
+	#
+	output_msg v "Updating the symlink to point to $BIN_DIR_W_VERSION"
+	cd $INSTALL_DIR
+	ln -sfn $BIN_DIR_W_VERSION $BINARY_NAME
+else
+	output_msg v "The sha512sums did NOT match"
+	output_msg v "Exiting..."
+	exit -20
+fi
+
+#
+# Clean-up the intermediary data and downloaded files.
+#
+output_msg v "Performing cleanup of intermediary data/files"
+cd $UNPACK_PARENT_DIR
+rm -rf $UNPACK_DIR
+
+cd $START_DIR
+output_msg v "Update of ${BINARY_NAME} complete"
+exit 0
+
