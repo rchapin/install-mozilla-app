@@ -49,7 +49,7 @@
 # author:   Ryan Chapin
 # created:  2014-07-06
 # updated:  2015-03-10
-# version:  1.03
+# version:  1.04
 #
 ################################################################################
 # EXIT CODES:
@@ -131,30 +131,24 @@ function var_is_set {
 # CONFIGURATIONS:
 #
 
-USER_CONF_FILE="install-mozilla-app.conf"
-
-# Determine the directory in which the script resides
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-
-# Pull in the user configurations
-source ${SCRIPT_DIR}/${USER_CONF_FILE} 
-
-
+# Name of the directory to be created into which we will unpack our download
+# file
 UNPACK_DIR="install_moz_app_temp"
 
-# Urls to the tarballs and the checksum files to be downloaded
-# The prefix and suffixes will be concatenated with the name of the application
-# to be installed at runtime.
+# Name of the user defined configs file
+USER_CONF_FILE="install-mozilla-app.conf"
+
+# Pull in the user configurations
+source /etc/${USER_CONF_FILE} 
+
+# Urls to the files to downloaded.  The prefix and suffixes will be concatenated
+# with the name of the application, the language, and OS.
 BIN_BASE_URL_PREFIX=https://ftp.mozilla.org/pub/mozilla.org
 BIN_BASE_URL_SUFFIX=releases/latest/${OS_VERSION}/${LANGUAGE}
 
 SHA_SUMS_FILE=SHA512SUMS
 SHA_SUMS_URL_PREFIX=https://ftp.mozilla.org/pub/mozilla.org
 SHA_SUMS_URL_SUFFIX=releases/latest/${SHA_SUMS_FILE}
-
-#
-# Configs for 
-#
 
 ################################################################################
 
@@ -195,9 +189,9 @@ function extended_usage {
 cat << EOF
 Extended Usage:
 
-   Users are required to edit and configure the $USER_CONF_FILE.
-   It is self explainatory and will enable the user to configure  the  directory
-   into  which the files are  downloaded,  unpacked,  verified,  and  ultimately
+   Users are required to edit and configure the  $USER_CONF_FILE.   It  is  self
+   explainatory and will  enable  the  user  to  configure  the  directory  into
+   which the  files  are  downloaded,   unpacked,   verified,   and   ultimately
    installed.
 
    In this context, installed means moved to the parent directory  as  specified
@@ -337,6 +331,72 @@ BINARY_NAME=$APP
 output_msg v "Installing mozilla app: $APP"
 
 
+#
+# Configs for each OS version:
+# The following is a series of associative arrays that contain the configs
+# necessary to properly concatenate the urls and file names for the files for
+# each OS version.
+#
+
+APP_NAME=$(echo $APP | tr [:lower:] [:upper:])
+output_msg d "APP_NAME = $APP_NAME"
+
+declare -A FIREFOX_CONF_LINUX_i686
+FIREFOX_CONF_LINUX_i686=([fn_prefix]=firefox- [fn_extension]=".tar.bz2")
+
+declare -A FIREFOX_CONF_LINUX_x86_64
+FIREFOX_CONF_LINUX_x86_64=([fn_prefix]=firefox- [fn_extension]=".tar.bz2")
+
+declare -A FIREFOX_CONF_MAC
+FIREFOX_CONF_MAC=([fn_prefix]="Firefox " [fn_extension]=".dmg")
+
+declare -A FIREFOX_CONF_WIN32
+FIREFOX_CONF_WIN32=([fn_prefix]="Firefox Setup " [fn_extension]=".exe")
+
+declare -A FIREFOX_CONF
+FIREFOX_CONF=(
+   [linux-i686]=FIREFOX_CONF_LINUX_i686
+   [linux-x86_64]=FIREFOX_CONF_LINUX_x86_64
+   [mac]=FIREFOX_CONF_MAC
+   [win32]=FIREFOX_CONF_WIN32
+)
+
+declare -A THUNDERBIRD_CONF_LINUX_i686
+THUNDERBIRD_CONF_LINUX_i686=([fn_prefix]=thunderbird- [fn_extension]=".tar.bz2")
+
+declare -A THUNDERBIRD_CONF_LINUX_x86_64
+THUNDERBIRD_CONF_LINUX_x86_64=([fn_prefix]=thunderbird- [fn_extension]=".tar.bz2")
+
+declare -A THUNDERBIRD_CONF_MAC
+THUNDERBIRD_CONF_MAC=([fn_prefix]="Thunderbird " [fn_extension]=".dmg")
+
+declare -A THUNDERBIRD_CONF_WIN32
+THUNDERBIRD_CONF_WIN32=([fn_prefix]="Thunderbird Setup " [fn_extension]=".exe")
+
+declare -A THUNDERBIRD_CONF
+THUNDERBIRD_CONF=(
+   [linux-i686]=THUNDERBIRD_CONF_LINUX_i686
+   [linux-x86_64]=THUNDERBIRD_CONF_LINUX_x86_64
+   [mac]=THUNDERBIRD_CONF_MAC
+   [win32]=THUNDERBIRD_CONF_WIN32
+)
+
+CMD_OS_VERSION_ARRAY_NAME="echo \"\${${APP_NAME}_CONF[${OS_VERSION}]}\""
+output_msg d "CMD_OS_VERSION_ARRAY_NAME = $CMD_OS_VERSION_ARRAY_NAME"
+OS_VERSION_ARRAY_NAME=$(eval $CMD_OS_VERSION_ARRAY_NAME)
+output_msg d "OS_VERSION_ARRAY_NAME = $OS_VERSION_ARRAY_NAME"
+
+CMD_PREFIX="echo \"\${${OS_VERSION_ARRAY_NAME}[fn_prefix]}\""
+output_msg d "CMD_PREFIX = $CMD_PREFIX"
+FN_PREFIX=$(eval $CMD_PREFIX)
+output_msg d "FN_PREFIX = $FN_PREFIX"
+
+CMD_EXTENSION="echo \"\${${OS_VERSION_ARRAY_NAME}[fn_extension]}\""
+output_msg d "CMD_EXTENSION = $CMD_EXTENSION"
+FN_EXTENSION=$(eval $CMD_EXTENSION)
+output_msg d "FN_EXTENSION = $FN_EXTENSION"
+
+
 # Concatenate the urls of both the binary to be downloaded and the checksum
 # files to be downloaded
 BIN_BASE_URL=${BIN_BASE_URL_PREFIX}/${BINARY_NAME}/${BIN_BASE_URL_SUFFIX}
@@ -372,17 +432,25 @@ download_file $WGET_INDEX_URL
 # Dynamically generate the grep command that will pull the file name
 # out of the downloaded html
 #
-# FIXME: Abstract out the specifics for this search, ie the '*.bz2'
-GREP_CMD="grep -oh '${BINARY_NAME}-.*.bz2\"' index.html | sed 's/\"//g'"
-output_msg d "BINARY_NAME GREP_CMD = $GREP_CMD"
 
-BZ2_FILE=$(eval "$GREP_CMD")
-output_msg d "BZ2_FILE = $BZ2_FILE"
+# Replace any spaces in the file name with '%20'
+FILE_TO_DOWNLOAD_CONCATD=$(echo ${FN_PREFIX}.*${FN_EXTENSION} | sed 's/ /%20/g')
+output_msg d "FILE_TO_DOWNLOAD_CONCATD = $FILE_TO_DOWNLOAD_CONCATD"
+
+GREP_CMD="grep -oh '$FILE_TO_DOWNLOAD_CONCATD\"' index.html | sed 's/\"//g'"
+output_msg d "Download file GREP_CMD = $GREP_CMD"
+
+FILE_TO_DOWNLOAD_PER20=$(eval "$GREP_CMD")
+output_msg d "FILE_TO_DOWNLOAD_PER20 = $FILE_TO_DOWNLOAD_PER20"
+
+# Remove any %20 and replace for spaces
+FILE_TO_DOWNLOAD_SANS_PER20=$(echo "$FILE_TO_DOWNLOAD_PER20" | sed 's/%20/ /g')
+output_msg d "FILE_TO_DOWNLOAD_SANS_PER20 = $FILE_TO_DOWNLOAD_SANS_PER20"
 
 #
 # Get the version number from the file name
 #
-GREP_CMD="echo $BZ2_FILE | grep -oh '[0-9]\{1,2\}[.][0-9]\{1,2\}[.0-9]\{1,2\}\?'"
+GREP_CMD="echo "$FILE_TO_DOWNLOAD_PER20" | grep -oh '[0-9]\{1,2\}[.][0-9]\{1,2\}[.0-9]\{1,2\}\?'"
 VERSION_NUMBER=$(eval "$GREP_CMD")
 
 #
@@ -393,13 +461,13 @@ GREP_CMD="echo $VERSION_NUMBER | grep -oh '[.0-9].*[0-9]'"
 VERSION_NUMBER=$(eval "$GREP_CMD")
 output_msg d "VERSION_NUMBER = $VERSION_NUMBER"
 
+
 output_msg v "------------------------------"
-output_msg v "-- Downloading BZ2_FILE, $BZ2_FILE"
+output_msg v "-- Downloading FILE_TO_DOWNLOAD, $FILE_TO_DOWNLOAD"
 output_msg v "--"
 
 WGET_INDEX_URL="${BIN_BASE_URL}/"
-download_file "${BIN_BASE_URL}/${BZ2_FILE}"
-
+download_file "${BIN_BASE_URL}/${FILE_TO_DOWNLOAD_PER20}"
 
 #
 # Download the SHA512SUMS for the file and check that the downloaded binary
@@ -411,7 +479,10 @@ output_msg v "--"
 
 download_file $SHA_SUMS_URL
 
-SHA_KEY="${OS_VERSION}/${LANGUAGE}/${BZ2_FILE}"
+
+SHA_KEY="${OS_VERSION}/${LANGUAGE}/${FILE_TO_DOWNLOAD_SANS_PER20}"
+output_msg d "SHA_KEY = $SHA_KEY"
+
 GREP_CMD="grep '$SHA_KEY' $SHA_SUMS_FILE"
 output_msg d "SHA_KEY GREP_CMD = $GREP_CMD"
 
@@ -419,29 +490,35 @@ SHA_SUM_LINE=$(eval "$GREP_CMD")
 SHA_SUM=$(echo $SHA_SUM_LINE | awk '{print $1}')
 output_msg d "SHA_SUM = $SHA_SUM"
 
-BZ2_FILE_SHA_SUM=$(sha512sum $BZ2_FILE | awk '{print $1}')
-output_msg d "BZ2_FILE_SHA_SUM = $BZ2_FILE_SHA_SUM"
+FILE_TO_DOWNLOAD_SHA_SUM=$(sha512sum "$FILE_TO_DOWNLOAD_SANS_PER20" | awk '{print $1}')
+output_msg d "FILE_TO_DOWNLOAD_SHA_SUM = $FILE_TO_DOWNLOAD_SHA_SUM"
 
 SHA_SUM_MATCHED=false
 
-if [ "$SHA_SUM" == "$BZ2_FILE_SHA_SUM" ];
+if [ "$SHA_SUM" == "$FILE_TO_DOWNLOAD_SHA_SUM" ];
 then
    SHA_SUM_MATCHED=true
 fi
 output_msg d "SHA_SUM_MATCHED = $SHA_SUM_MATCHED"
 
-#
-# Only continue unpacking and installing the program if the hashes validated
-#
 if [ "$SHA_SUM_MATCHED" = true ];
 then
-   output_msg v "the sha512sums matched, continuing installation...."
+   output_msg v "SHASUMs matched"
+fi
+
+#
+# Only continue unpacking and installing the program if the hashes validated
+# and are running (or at least configured as) under Linux.
+#
+if [ "$SHA_SUM_MATCHED" = true ] && [[ $OS_VERSION == *"linux"* ]];
+then
+   output_msg v "Continuing installation...."
 
    #
    # Unpack the bz2 file and then rename it to include the version number
    #
-   output_msg v "Unpacking the ${BZ2_FILE} file"
-   tar -xjf $BZ2_FILE
+   output_msg v "Unpacking the ${FILE_TO_DOWNLOAD_SANS_PER20} file"
+   tar -xjf $FILE_TO_DOWNLOAD_SANS_PER20
    BIN_DIR_W_VERSION=${BINARY_NAME}-${VERSION_NUMBER}
    mv $BINARY_NAME ${BIN_DIR_W_VERSION}
 
@@ -458,7 +535,12 @@ then
    output_msg v "Updating the symlink to point to $BIN_DIR_W_VERSION"
    cd $INSTALL_DIR
    ln -sfn $BIN_DIR_W_VERSION $BINARY_NAME
-else
+
+   output_msg v "Update of ${BINARY_NAME} complete"
+fi
+
+if [ "$SHA_SUM_MATCHED" = false ];
+then
    output_msg v "The sha512sums did NOT match"
    output_msg v "Exiting..."
    exit 20
@@ -472,5 +554,4 @@ cd $UNPACK_PARENT_DIR
 rm -rf $UNPACK_DIR
 
 cd $START_DIR
-output_msg v "Update of ${BINARY_NAME} complete"
 exit 0
