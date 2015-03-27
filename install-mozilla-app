@@ -166,7 +166,7 @@ function usage {
    cat << EOF
 Usage: install-mozilla-app [OPTIONS] -a APP [firefox|thunderbird]
 
-   -t APP
+   -a APP
       The mozilla application to be installed, either firefox or thunderbird
 
 Options:
@@ -189,9 +189,9 @@ function extended_usage {
 cat << EOF
 Extended Usage:
 
-   Users are required to edit and configure the  $USER_CONF_FILE.   It  is  self
-   explainatory and will  enable  the  user  to  configure  the  directory  into
-   which the  files  are  downloaded,   unpacked,   verified,   and   ultimately
+   Users are required to edit and configure the  $USER_CONF_FILE.
+   It  is  self explainatory and will enable the user to configure the directory
+   into which the files are downloaded,  unpacked,  verified,   and   ultimately
    installed.
 
    In this context, installed means moved to the parent directory  as  specified
