@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# -f          : disable filename expansion
+# -o pipefail : generate a failure return code if any command in a chain
+#               of piped commands fails.
+set -f -o pipefail
+
 ################################################################################
 # LICENSE
 #
@@ -48,8 +53,8 @@
 # name:     install-mozilla-app
 # author:   Ryan Chapin
 # created:  2014-07-06
-# updated:  2015-03-10
-# version:  1.04
+# updated:  2015-09-28
+# version:  1.05
 #
 ################################################################################
 # EXIT CODES:
@@ -66,10 +71,17 @@
 #
 
 #
-# Debugging and verbose output; accepts two arguments:
-#  $1 = OUTPUT_TYPE [v (verbose) | d (debug) ]
+# Debugging, verbose output, and output to STDERR; accepts two required
+# arguments.  The third is optional and use with the e option.
+#  $1 = OUTPUT_TYPE [v (verbose) | d (debug) | e (error) 
 #  $2 = OUTPUT_MSG
 function output_msg {
+   if [ "e" = "$1" ]
+   then
+      >&2 echo "$2"
+      exit "$3"
+   fi
+
    if [ "v" = "$1" ] && [ 1 -eq "$VERBOSE" ];
    then
       echo "$2"
@@ -78,7 +90,7 @@ function output_msg {
    if [ "d" = "$1" ] && [ 1 -eq "$DEBUG" ];
    then
       echo "$2"
-   fi   
+   fi 
 }
 
 #
@@ -99,8 +111,7 @@ function download_file {
    
    if [ 0 -ne $? ];
    then
-      output_msg v "ERROR: Command \'$CMD\' failed"
-      exit 10
+      output_msg v "ERROR: Command \'$CMD\' failed" 10
    fi
 }
 
@@ -109,9 +120,11 @@ function dir_exists {
 
    if [ ! -d "$DIR_TO_CHECK" ];
    then
-      output_msg v "ERROR: Directory, '$DIR_TO_CHECK' does not exist."
-      output_msg v "       Check the aformentioned var in your .conf file."
-      exit 4
+      read -r -d '' ERR_MSG << EOF
+ERROR: Directory, '$DIR_TO_CHECK' does not exist.
+       Check the aformentioned var in your .conf file.
+EOF
+      output_msg e "$ERR_MSG" 4
    fi
 }
 
@@ -121,9 +134,11 @@ function var_is_set {
 
    if [ -z "$VAR_VAL" ];
    then
-      output_msg v "ERROR: Required variable '\$$VAR_NAME' was not set."
-      output_msg v "       Check the aformentioned var in your .conf file."
-      exit 3
+      read -r -d '' ERR_MSG << EOF
+ERROR: Required variable '\$$VAR_NAME' was not set.
+       Check the aformentioned var in your .conf file.
+EOF
+      output_msg e "$ERR_MSG" 3
    fi
 }
 
@@ -241,8 +256,7 @@ PARSED_OPTIONS=`getopt -o hvda: -l more-help -- "$@"`
 # Check to see if the getopts command failed
 if [ $? -ne 0 ];
 then
-   echo "ERROR: Failed to parse arguments"
-   exit 1
+   output_msg e "ERROR: Failed to parse arguments" 1
 fi
 
 eval set -- "$PARSED_OPTIONS"
@@ -310,8 +324,7 @@ output_msg d "-a APP arg = $APP"
 #
 if [ -z "$APP" ];
 then
-   output_msg v "ERROR: no application key was specified"
-   exit 2
+   output_msg e "ERROR: no application key was specified" 2
 fi
 
 #
@@ -319,13 +332,11 @@ fi
 #
 var_is_set "$OS_VERSION" "OS_VERSION"
 var_is_set "$LANGUAGE" "LANGUAGE"
-
 var_is_set "$INSTALL_DIR" "INSTALL_DIR"
-dir_exists "$INSTALL_DIR"
-
 var_is_set "$UNPACK_PARENT_DIR" "UNPACK_PARENT_DIR"
-dir_exists "$UNPACK_PARENT_DIR"
 
+dir_exists "$INSTALL_DIR"
+dir_exists "$UNPACK_PARENT_DIR"
 
 BINARY_NAME=$APP
 output_msg v "Installing mozilla app: $APP"
@@ -541,9 +552,11 @@ fi
 
 if [ "$SHA_SUM_MATCHED" = false ];
 then
-   output_msg v "The sha512sums did NOT match"
-   output_msg v "Exiting..."
-   exit 20
+   read -r -d '' ERR_MSG << EOF
+ERROR: The sha512sums did NOT match
+       Exiting...
+EOF
+   output_msg e "$ERR_MSG" 20
 fi
 
 #
@@ -554,4 +567,3 @@ cd $UNPACK_PARENT_DIR
 rm -rf $UNPACK_DIR
 
 cd $START_DIR
-exit 0
