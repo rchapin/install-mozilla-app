@@ -94,7 +94,7 @@ function output_msg {
 }
 
 #
-# Abstraction for calling wget, supressing its stdout/stderr and checking the
+# Abstraction for calling wget, suppressing its stdout/stderr and checking the
 # exit code from wget.
 # Accepts two argument:
 #  $1 = URL the url to download
@@ -132,7 +132,7 @@ function download_file {
 
       if [ 1 -ne "$VERBOSE" ];
       then
-        # Then supress any output to STDOUT
+        # Then suppress any output to STDOUT
         CMD="$CMD > $STDOUT_STDERR_SAVE_PATH 2>&1"
       else
         # Set up the command to tee the output to provide feedback to the user.
@@ -391,7 +391,6 @@ var_is_set "$UNPACK_PARENT_DIR" "UNPACK_PARENT_DIR"
 dir_exists "$INSTALL_DIR"
 dir_exists "$UNPACK_PARENT_DIR"
 
-BINARY_NAME=$APP
 output_msg v "Installing mozilla app: $APP"
 
 
@@ -465,9 +464,6 @@ FN_EXTENSION=$(eval $CMD_EXTENSION)
 output_msg d "FN_EXTENSION = $FN_EXTENSION"
 
 # #############################################################################
-
-# Concatenate the URL for the binary that will be downloaded
-# BIN_BASE_URL=${BIN_BASE_URL_PREFIX}/${BINARY_NAME}/${BIN_BASE_URL_SUFFIX}
 
 START_DIR=`pwd`
 
@@ -582,8 +578,8 @@ then
    #
    output_msg v "Unpacking the ${DOWNLOAD_FILE_NAME} file"
    tar -xjf $DOWNLOAD_FILE
-   BIN_DIR_W_VERSION=${BINARY_NAME}-${VERSION_NUMBER}
-   mv $BINARY_NAME ${BIN_DIR_W_VERSION}
+   BIN_DIR_W_VERSION=${APP}-${VERSION_NUMBER}
+   mv $APP ${BIN_DIR_W_VERSION}
 
    #
    # mv it to the directory into which we are going to install it
@@ -597,9 +593,9 @@ then
    #
    output_msg v "Updating the symlink to point to $BIN_DIR_W_VERSION"
    cd $INSTALL_DIR
-   ln -sfn $BIN_DIR_W_VERSION $BINARY_NAME
+   ln -sfn $BIN_DIR_W_VERSION $APP
 
-   output_msg v "Update of ${BINARY_NAME} complete"
+   output_msg v "Update of ${APP} complete"
 fi
 
 if [ "$SHA_SUM_MATCHED" = false ];
