@@ -54,7 +54,7 @@ set -f -o pipefail
 # author:   Ryan Chapin
 # created:  2014-07-06
 # updated:  2016-01-26
-# version:  2.01
+# version:  2.00
 #
 ################################################################################
 # EXIT CODES:
