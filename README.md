@@ -6,7 +6,7 @@ Automates the download, verification and installation of distributions of mozill
 
 Initially written as I was running CentOS 6.x on a desktop machine and wanted to make sure that I had the latest and greatest of both Firefox and Thunderbird.  As CentOS did not continually update the RPMs with the continuous changes made to those two code bases I was tired of having to manually download, check the hashes of the downloaded files and 'install' them on my machine.
 
-Since, I have expanded the script to run under Win and Mac with a bash interpreter.  For those operating systems, if the user so desires, they can use this script to automate the download and checking of the hashes of the latest version of Firefox and/or Thunderbird.
+Since, I have expanded the script to run under Win and Mac with a bash interpreter.  For those operating systems, if the user so desires, they can use this script to automate the download and checking of the hashes of the latest version of Firefox and/or Thunderbird.  The 'installation' part of the program does not yet support Win or Mac.
 
 Please see the script and the config file themselves for complete documentation.
 

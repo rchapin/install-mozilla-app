@@ -53,8 +53,8 @@ set -f -o pipefail
 # name:     install-mozilla-app
 # author:   Ryan Chapin
 # created:  2014-07-06
-# updated:  2015-09-28
-# version:  1.05
+# updated:  2016-01-26
+# version:  2.01
 #
 ################################################################################
 # EXIT CODES:
@@ -96,22 +96,59 @@ function output_msg {
 #
 # Abstraction for calling wget, supressing its stdout/stderr and checking the
 # exit code from wget.
-# Accepts one argument:
+# Accepts two argument:
 #  $1 = URL the url to download
+#  $2 = [optional] output file name to which wget should save its downloaded
+#       data.
+#  $3 = [optional] path to file in which STDOUT and STDERR from the command
+#       will be saved.
 function download_file {
    local URL=$1
-   CMD="wget $URL"
-   
-   if [ 1 -ne "$VERBOSE" ];
+
+   # Output file name
+   local OUTFILE_NAME=$2
+
+   # If this arg is set then we will save the STDOUT and STDERR to the fully
+   # qualified path provided.  This path MUST already exist.
+   local STDOUT_STDERR_SAVE_PATH=$3
+
+   CMD="wget"
+
+   if [ -n "$OUTFILE_NAME" ];
+   then
+      output_msg d "Adding OUTFILE_NAME $OUTFILE_NAME to wget command"
+      CMD="$CMD -O $OUTFILE_NAME"
+   fi
+
+   CMD="$CMD \"$URL\""
+
+   if [ -n "$STDOUT_STDERR_SAVE_PATH" ];
+   then
+      output_msg d "Saving STDOUT AND STDERR TO $STDOUT_STDERR_SAVE_PATH"
+      if [ -e "$STDOUT_STDERR_SAVE_PATH" ];
+      then
+         rm -f $STDOUT_STDERR_SAVE_PATH
+      fi
+
+      if [ 1 -ne "$VERBOSE" ];
+      then
+        # Then supress any output to STDOUT
+        CMD="$CMD > $STDOUT_STDERR_SAVE_PATH 2>&1"
+      else
+        # Set up the command to tee the output to provide feedback to the user.
+        CMD="$CMD 2>&1 | tee $STDOUT_STDERR_SAVE_PATH"
+      fi
+
+   elif [ 1 -ne "$VERBOSE" ];
    then
       CMD="$CMD > /dev/null 2>&1"
    fi
-   
+
    eval $CMD
-   
+
    if [ 0 -ne $? ];
    then
-      output_msg v "ERROR: Command \'$CMD\' failed" 10
+      output_msg e "ERROR: Command \'$CMD\' failed" 10
    fi
 }
 
@@ -142,6 +179,7 @@ EOF
    fi
 }
 
+
 ################################################################################
 # CONFIGURATIONS:
 #
@@ -156,14 +194,25 @@ USER_CONF_FILE="install-mozilla-app.conf"
 # Pull in the user configurations
 source /etc/${USER_CONF_FILE} 
 
-# Urls to the files to downloaded.  The prefix and suffixes will be concatenated
-# with the name of the application, the language, and OS.
-BIN_BASE_URL_PREFIX=https://ftp.mozilla.org/pub/mozilla.org
-BIN_BASE_URL_SUFFIX=releases/latest/${OS_VERSION}/${LANGUAGE}
+# File name into which we will save the STDOUT and STDERR of the wget command
+# used to download the 'installer' file.
+WGET_OUTPUT_FILE=download_bin_wget.out
 
+# Prefix for the URL that will be concatenated to download the latest binary
+BIN_BASE_URL_PREFIX="https://download.mozilla.org/?product="
+
+# The suffix that will be appended to the value for the 'product' field in the
+# query string.
+PRODUCT_SUFFIX=latest
+
+# The field names to be added to the URL that will be used to download the binary
+FIELD_OS=os
+FIELD_LANG=lang
+
+# Vars used to build the URL to download the checksum file
 SHA_SUMS_FILE=SHA512SUMS
-SHA_SUMS_URL_PREFIX=https://ftp.mozilla.org/pub/mozilla.org
-SHA_SUMS_URL_SUFFIX=releases/latest/${SHA_SUMS_FILE}
+SHA_SUMS_URL_PREFIX=http://download-origin.cdn.mozilla.net/pub
+SHA_SUMS_URL_RELEASES_DIR=releases
 
 ################################################################################
 
@@ -225,7 +274,8 @@ Examples:
 
    Given the following configuration:
 
-OS_VERSION="linux-x86_64"
+OS_VERSION="linux64"
+OS_VERSION_CHECKSUM="linux-x86_64"
 LANGUAGE="en-US"
 INSTALL_DIR="/usr/local"
 UNPACK_PARENT_DIR="/tmp"
@@ -234,13 +284,15 @@ UNPACK_PARENT_DIR="/tmp"
 
    $ ./install-mozilla-app -v -d -a firefox
 
-   The firefox binary for linux-x86_64 in US English will be downloaded  to  the
-   /tmp directory.  The file will be unpacked and verified  in  /tmp.   Assuming
-   that the most current version  of  firefox  is  36.0.1,  the  directory  that
-   contains the firefox binary and  its  attendant  files  will  be  renamed  to
-   'firefox-36.0.1' and then it will be moved to  the  INSTALL_DIR  (/usr/local)
-   as specified in the configs.  Then once moved to /usr/local  a  symlink  will
-   be created in /usr/local: firefox -> firefox-36.0.1
+   The firefox binary for linux-x86_64 in US English will  be  downloaded  to  a 
+   tempory directory created in /tmp (see the UNPACK_DIR configuration  variable
+   for the name of the dir).  The file will be  unpacked  and  verified  in  the
+   temporary directory.  Assuming that the most current version  of  firefox  is
+   36.0.1, the directory that contains the  firefox  binary  and  its  attendant
+   files will be renamed to 'firefox-36.0.1' and then it will be  moved  to  the
+   INSTALL_DIR (/usr/local) as specified in the configs.   Then  once  moved  to
+   /usr/local  a  symlink  will be created in /usr/local:
+   firefox -> firefox-36.0.1
 EOF
 }
 
@@ -331,6 +383,7 @@ fi
 # Verify that all of the required configs have been set 
 #
 var_is_set "$OS_VERSION" "OS_VERSION"
+var_is_set "$OS_VERSION_CHECKSUM" "OS_VERSION_CHECKSUM"
 var_is_set "$LANGUAGE" "LANGUAGE"
 var_is_set "$INSTALL_DIR" "INSTALL_DIR"
 var_is_set "$UNPACK_PARENT_DIR" "UNPACK_PARENT_DIR"
@@ -342,6 +395,10 @@ BINARY_NAME=$APP
 output_msg v "Installing mozilla app: $APP"
 
 
+# #############################################################################
+#
+# This is some experimental code that could make this script platform
+# independent (as long as a compatible bash version is present).
 #
 # Configs for each OS version:
 # The following is a series of associative arrays that contain the configs
@@ -366,10 +423,10 @@ FIREFOX_CONF_WIN32=([fn_prefix]="Firefox Setup " [fn_extension]=".exe")
 
 declare -A FIREFOX_CONF
 FIREFOX_CONF=(
-   [linux-i686]=FIREFOX_CONF_LINUX_i686
-   [linux-x86_64]=FIREFOX_CONF_LINUX_x86_64
-   [mac]=FIREFOX_CONF_MAC
-   [win32]=FIREFOX_CONF_WIN32
+   [linux]=FIREFOX_CONF_LINUX_i686
+   [linux64]=FIREFOX_CONF_LINUX_x86_64
+   [osx]=FIREFOX_CONF_MAC
+   [win64]=FIREFOX_CONF_WIN64
 )
 
 declare -A THUNDERBIRD_CONF_LINUX_i686
@@ -386,10 +443,10 @@ THUNDERBIRD_CONF_WIN32=([fn_prefix]="Thunderbird Setup " [fn_extension]=".exe")
 
 declare -A THUNDERBIRD_CONF
 THUNDERBIRD_CONF=(
-   [linux-i686]=THUNDERBIRD_CONF_LINUX_i686
-   [linux-x86_64]=THUNDERBIRD_CONF_LINUX_x86_64
-   [mac]=THUNDERBIRD_CONF_MAC
-   [win32]=THUNDERBIRD_CONF_WIN32
+   [linux]=THUNDERBIRD_CONF_LINUX_i686
+   [linux64]=THUNDERBIRD_CONF_LINUX_x86_64
+   [osx]=THUNDERBIRD_CONF_MAC
+   [win64]=THUNDERBIRD_CONF_WIN64
 )
 
 CMD_OS_VERSION_ARRAY_NAME="echo \"\${${APP_NAME}_CONF[${OS_VERSION}]}\""
@@ -407,11 +464,10 @@ output_msg d "CMD_EXTENSION = $CMD_EXTENSION"
 FN_EXTENSION=$(eval $CMD_EXTENSION)
 output_msg d "FN_EXTENSION = $FN_EXTENSION"
 
+# #############################################################################
 
-# Concatenate the urls of both the binary to be downloaded and the checksum
-# files to be downloaded
-BIN_BASE_URL=${BIN_BASE_URL_PREFIX}/${BINARY_NAME}/${BIN_BASE_URL_SUFFIX}
-SHA_SUMS_URL=${SHA_SUMS_URL_PREFIX}/${BINARY_NAME}/${SHA_SUMS_URL_SUFFIX}
+# Concatenate the URL for the binary that will be downloaded
+# BIN_BASE_URL=${BIN_BASE_URL_PREFIX}/${BINARY_NAME}/${BIN_BASE_URL_SUFFIX}
 
 START_DIR=`pwd`
 
@@ -419,66 +475,57 @@ cd $UNPACK_PARENT_DIR
 
 #
 # Check to see if there is an existing UNPACK_DIR
-#
 if [ -d "$UNPACK_DIR" ];
 then
-   output_msg v "Deleting an existing UNPACK_DIR, ${UNPACK_PARENT_DIR}/${UNPACK_DIR}"
+   output_msg d "Deleting an existing UNPACK_DIR, ${UNPACK_PARENT_DIR}/${UNPACK_DIR}"
    rm -rf $UNPACK_DIR
 fi
 
 mkdir $UNPACK_DIR
 cd $UNPACK_DIR
 
-#
-# Get the index.html that contains the name of the latest bz2 file
-#
+
 output_msg v "------------------------------"
-output_msg v "-- Downloading the index.html"
+output_msg v "-- Downloading 'install' file for $APP"
 output_msg v "--"
 
-WGET_INDEX_URL="${BIN_BASE_URL}/"
-download_file $WGET_INDEX_URL
 
 #
-# Dynamically generate the grep command that will pull the file name
-# out of the downloaded html
+# Concatenate the URL to download the latest binary for the app requested
 #
+BIN_URL="${BIN_BASE_URL_PREFIX}${APP}-${PRODUCT_SUFFIX}&${FIELD_OS}=${OS_VERSION}&${FIELD_LANG}=${LANGUAGE}"
+output_msg d "BIN_URL = $BIN_URL"
 
-# Replace any spaces in the file name with '%20'
-FILE_TO_DOWNLOAD_CONCATD=$(echo ${FN_PREFIX}.*${FN_EXTENSION} | sed 's/ /%20/g')
-output_msg d "FILE_TO_DOWNLOAD_CONCATD = $FILE_TO_DOWNLOAD_CONCATD"
+WGET_OUTPUT_PATH=${UNPACK_PARENT_DIR}/${UNPACK_DIR}/${WGET_OUTPUT_FILE}
+DOWNLOAD_FILE="${APP}.download"
 
-GREP_CMD="grep -oh '$FILE_TO_DOWNLOAD_CONCATD\"' index.html | sed 's/\"//g'"
-output_msg d "Download file GREP_CMD = $GREP_CMD"
-
-FILE_TO_DOWNLOAD_PER20=$(eval "$GREP_CMD")
-output_msg d "FILE_TO_DOWNLOAD_PER20 = $FILE_TO_DOWNLOAD_PER20"
-
-# Remove any %20 and replace for spaces
-FILE_TO_DOWNLOAD_SANS_PER20=$(echo "$FILE_TO_DOWNLOAD_PER20" | sed 's/%20/ /g')
-output_msg d "FILE_TO_DOWNLOAD_SANS_PER20 = $FILE_TO_DOWNLOAD_SANS_PER20"
+# By appending a path to a file we will save the stdout of the download_file
+# implementation command to a file.  From which we will be able to glean the
+# name and version number of the file that we have downloaded.
+download_file $BIN_URL $DOWNLOAD_FILE $WGET_OUTPUT_PATH
 
 #
-# Get the version number from the file name
+# Dynamically generate the grep command that will extract the file name that
+# was downloaded from the output of the wget command.
 #
-GREP_CMD="echo "$FILE_TO_DOWNLOAD_PER20" | grep -oh '[0-9]\{1,2\}[.][0-9]\{1,2\}[.0-9]\{1,2\}\?'"
-VERSION_NUMBER=$(eval "$GREP_CMD")
+# Look for the first line that contains 'Location', and then extract from that
+# line, the name of the app plus the version number.
+#
+GREP_CMD_FILE_NAME="grep -m 1 'Location' $WGET_OUTPUT_PATH | \
+grep -oh '${APP}-[0-9]\{1,2\}[.][0-9]\{1,2\}[.][0-9]\{1,2\}\?[.a-z0-9]*'"
+DOWNLOAD_FILE_NAME=$(eval "$GREP_CMD_FILE_NAME")
+output_msg d "DOWNLOAD_FILE_NAME = $DOWNLOAD_FILE_NAME"
 
-#
-# Run another regex on the string to make sure that we lop off any
-# trailing '.' if there is one
-#
-GREP_CMD="echo $VERSION_NUMBER | grep -oh '[.0-9].*[0-9]'"
-VERSION_NUMBER=$(eval "$GREP_CMD")
+# Extract the version number from the file name
+GREP_CMD_VERSION_NUM="echo $DOWNLOAD_FILE_NAME | \
+grep -oh '[0-9]\{1,2\}[.][0-9]\{1,2\}[.][0-9]\{1,2\}\?*'"
+VERSION_NUMBER=$(eval "$GREP_CMD_VERSION_NUM")
 output_msg d "VERSION_NUMBER = $VERSION_NUMBER"
 
+# Ensure that the version number does not contain a trailing '.'
+VERSION_NUMBER=$(echo "$VERSION_NUMBER" | sed 's/\.$//g')
+output_msg d "VERSION_NUMBER after removing trailing '.' = $VERSION_NUMBER"
 
-output_msg v "------------------------------"
-output_msg v "-- Downloading FILE_TO_DOWNLOAD, $FILE_TO_DOWNLOAD"
-output_msg v "--"
-
-WGET_INDEX_URL="${BIN_BASE_URL}/"
-download_file "${BIN_BASE_URL}/${FILE_TO_DOWNLOAD_PER20}"
 
 #
 # Download the SHA512SUMS for the file and check that the downloaded binary
@@ -488,10 +535,14 @@ output_msg v "------------------------------"
 output_msg v "-- Downloading shasum file"
 output_msg v "--"
 
+#
+# Concatenate the URL of the SHASUMS file to download
+#
+SHA_SUMS_URL=${SHA_SUMS_URL_PREFIX}/${APP}/${SHA_SUMS_URL_RELEASES_DIR}/${VERSION_NUMBER}/${SHA_SUMS_FILE}
+output_msg d "Downloading file from $SHA_SUMS_URL"
 download_file $SHA_SUMS_URL
 
-
-SHA_KEY="${OS_VERSION}/${LANGUAGE}/${FILE_TO_DOWNLOAD_SANS_PER20}"
+SHA_KEY="${OS_VERSION_CHECKSUM}/${LANGUAGE}/${DOWNLOAD_FILE_NAME}"
 output_msg d "SHA_KEY = $SHA_KEY"
 
 GREP_CMD="grep '$SHA_KEY' $SHA_SUMS_FILE"
@@ -501,12 +552,12 @@ SHA_SUM_LINE=$(eval "$GREP_CMD")
 SHA_SUM=$(echo $SHA_SUM_LINE | awk '{print $1}')
 output_msg d "SHA_SUM = $SHA_SUM"
 
-FILE_TO_DOWNLOAD_SHA_SUM=$(sha512sum "$FILE_TO_DOWNLOAD_SANS_PER20" | awk '{print $1}')
-output_msg d "FILE_TO_DOWNLOAD_SHA_SUM = $FILE_TO_DOWNLOAD_SHA_SUM"
+DOWNLOAD_FILE_SHASHUM=$(sha512sum "$DOWNLOAD_FILE" | awk '{print $1}')
+output_msg d "DOWNLOAD_FILE_SHASHUM = $DOWNLOAD_FILE_SHASHUM"
 
 SHA_SUM_MATCHED=false
 
-if [ "$SHA_SUM" == "$FILE_TO_DOWNLOAD_SHA_SUM" ];
+if [ "$SHA_SUM" == "$DOWNLOAD_FILE_SHASHUM" ];
 then
    SHA_SUM_MATCHED=true
 fi
@@ -516,6 +567,7 @@ if [ "$SHA_SUM_MATCHED" = true ];
 then
    output_msg v "SHASUMs matched"
 fi
+
 
 #
 # Only continue unpacking and installing the program if the hashes validated
@@ -528,8 +580,8 @@ then
    #
    # Unpack the bz2 file and then rename it to include the version number
    #
-   output_msg v "Unpacking the ${FILE_TO_DOWNLOAD_SANS_PER20} file"
-   tar -xjf $FILE_TO_DOWNLOAD_SANS_PER20
+   output_msg v "Unpacking the ${DOWNLOAD_FILE_NAME} file"
+   tar -xjf $DOWNLOAD_FILE
    BIN_DIR_W_VERSION=${BINARY_NAME}-${VERSION_NUMBER}
    mv $BINARY_NAME ${BIN_DIR_W_VERSION}
 
