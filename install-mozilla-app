@@ -53,8 +53,8 @@ set -f -o pipefail
 # name:     install-mozilla-app
 # author:   Ryan Chapin
 # created:  2014-07-06
-# updated:  2016-01-26
-# version:  2.00
+# updated:  2020-07-29
+# version:  2.01
 #
 ################################################################################
 # EXIT CODES:
@@ -541,7 +541,7 @@ download_file $SHA_SUMS_URL
 SHA_KEY="${OS_VERSION_CHECKSUM}/${LANGUAGE}/${DOWNLOAD_FILE_NAME}"
 output_msg d "SHA_KEY = $SHA_KEY"
 
-GREP_CMD="grep '$SHA_KEY' $SHA_SUMS_FILE"
+GREP_CMD="grep '$SHA_KEY' $SHA_SUMS_FILE | sed \"s/b'//\" | sed \"s/'//\""
 output_msg d "SHA_KEY GREP_CMD = $GREP_CMD"
 
 SHA_SUM_LINE=$(eval "$GREP_CMD")
