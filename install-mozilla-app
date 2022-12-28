@@ -53,8 +53,8 @@ set -f -o pipefail
 # name:     install-mozilla-app
 # author:   Ryan Chapin
 # created:  2014-07-06
-# updated:  2020-07-29
-# version:  2.01
+# updated:  2022-12-28
+# version:  2.02
 #
 ################################################################################
 # EXIT CODES:
@@ -508,13 +508,13 @@ download_file $BIN_URL $DOWNLOAD_FILE $WGET_OUTPUT_PATH
 # line, the name of the app plus the version number.
 #
 GREP_CMD_FILE_NAME="grep -m 1 'Location' $WGET_OUTPUT_PATH | \
-grep -oh '${APP}-[0-9]\{1,2\}[.][0-9]\{1,2\}[.][0-9]\{1,2\}\?[.a-z0-9]*'"
+grep -oh '${APP}-.*[.]bz2'"
 DOWNLOAD_FILE_NAME=$(eval "$GREP_CMD_FILE_NAME")
 output_msg d "DOWNLOAD_FILE_NAME = $DOWNLOAD_FILE_NAME"
 
 # Extract the version number from the file name
 GREP_CMD_VERSION_NUM="echo $DOWNLOAD_FILE_NAME | \
-grep -oh '[0-9]\{1,2\}[.][0-9]\{1,2\}[.][0-9]\{1,2\}\?*'"
+grep -oh '[0-9]\+[.][0-9]\+[.][0-9]\+\?*'"
 VERSION_NUMBER=$(eval "$GREP_CMD_VERSION_NUM")
 output_msg d "VERSION_NUMBER = $VERSION_NUMBER"
 
